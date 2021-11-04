@@ -1,0 +1,84 @@
+version: '3.7'
+services:
+
+    
+    core:
+        build:
+            context: .
+            dockerfile: dockerfile
+        container_name: 'core'
+        restart: on-failure
+        environment:
+          - MY_API_KEY=secretKey123   
+          - DB_HOST=172.29.0.3
+          - DB_NAME=currency_db
+          - DB_USER=postgres
+          - DB_PASS=postgres
+          - DB_PORT=5432
+          - RABBIT_HOST=172.29.0.4
+          - CELERY_FREQUENCY=10 #call frequency in seconds
+        command: > 
+            bash -c "celery -A currency worker --loglevel=info -B --detach
+            && python manage.py makemigrations core
+            && python manage.py migrate core 
+            && python manage.py runserver 0.0.0.0:8000"
+            
+        
+        ports:
+            - 8000:8000
+        networks:
+            core_nw:
+                ipv4_address: 172.29.0.2
+        volumes:
+            - ./currency:/currency
+        depends_on:
+            - postgres
+            - rabbitmq
+
+
+    postgres:
+        image: postgres:10.5
+        container_name: 'postgres_db'
+        restart: always
+        environment:
+          - POSTGRES_USER=postgres
+          - POSTGRES_PASSWORD=postgres
+        logging:
+          options:
+            max-size: 10m
+            max-file: "3"
+        ports:
+          - '5438:5432'
+        networks:
+            core_nw:
+                ipv4_address: 172.29.0.3
+          
+        volumes: 
+          - ./postgres-data/data:/var/lib/postgresql/data
+          - ./postgres-data/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+
+          # copy the sql script to create tables
+          # - ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
+
+    rabbitmq:
+        image: rabbitmq:3-management-alpine
+        container_name: 'rabbitmq'
+        ports:
+            - 5672:5672
+            - 15672:15672
+        networks:
+            core_nw:
+                ipv4_address: 172.29.0.4
+        volumes:
+            - ./rabbitmq-data/data/:/var/lib/rabbitmq/
+            - ./rabbitmq-data/log/:/var/log/rabbitmq
+        
+    
+networks:
+    core_nw:
+        driver: bridge
+        ipam:
+            config:
+              - subnet: 172.29.0.0/24
+                gateway: 172.29.0.1
